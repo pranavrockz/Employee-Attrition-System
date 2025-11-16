@@ -8,7 +8,7 @@ from tensorflow.keras.models import load_model
 st.set_page_config(page_title="Employee Attrition Prediction", layout="wide")
 
 # ------------------------------
-# 1️⃣ Model Loading
+# 1️⃣ Model Loading - FIXED PATHS
 # ------------------------------
 model_dict = {}
 model_files = {
@@ -30,45 +30,25 @@ for name, path in model_files.items():
     else:
         st.sidebar.warning(f"⚠️ {path} not found")
 
-# 🆕 EXTRACT FEATURE ORDER FROM NEURAL NETWORK SCALER
-NN_FEATURES = None
-scaler_path = "models/neural_network_scaler.joblib"
-if os.path.exists(scaler_path):
-    try:
-        scaler = joblib.load(scaler_path)
-        # Check if scaler has feature names
-        if hasattr(scaler, 'feature_names_in_'):
-            NN_FEATURES = list(scaler.feature_names_in_)
-            st.sidebar.success(f"🧠 Neural Network scaler has {len(NN_FEATURES)} features")
-        else:
-            st.sidebar.warning("🧠 Scaler doesn't have feature names, using Random Forest features")
-    except Exception as e:
-        st.sidebar.error(f"❌ Failed to load scaler: {e}")
+# 🆕 EXACT FEATURE ORDER FROM YOUR DATA
+EXPECTED_FEATURES = [
+    'BusinessTravel', 'Department', 'DistanceFromHome', 'Education',
+    'EducationField', 'EmployeeNumber', 'EnvironmentSatisfaction', 'Gender',
+    'HourlyRate', 'JobInvolvement', 'JobLevel', 'JobRole',
+    'JobSatisfaction', 'MaritalStatus', 'MonthlyIncome', 'Bonus',
+    'NumCompaniesWorked', 'OverTime', 'PerformanceRating',
+    'RelationshipSatisfaction', 'StockOptionLevel', 'TotalWorkingYears',
+    'TrainingTimesLastYear', 'WorkLifeBalance', 'BusinessTravel_FreqEnc',
+    'Department_FreqEnc', 'EducationField_FreqEnc', 'Gender_FreqEnc',
+    'JobRole_FreqEnc', 'MaritalStatus_FreqEnc', 'OverTime_FreqEnc',
+    'BusinessTravel_TargetEnc', 'Department_TargetEnc',
+    'EducationField_TargetEnc', 'Gender_TargetEnc', 'JobRole_TargetEnc',
+    'MaritalStatus_TargetEnc', 'OverTime_TargetEnc', 'HighTravelOvertime',
+    'SingleOvertime'
+]
 
-# 🆕 GET EXPECTED FEATURES (PRIORITIZE NEURAL NETWORK, FALLBACK TO RANDOM FOREST)
-if NN_FEATURES is not None:
-    EXPECTED_FEATURES = NN_FEATURES
-    st.sidebar.info(f"🔍 Using {len(EXPECTED_FEATURES)} features from Neural Network scaler")
-elif "Random Forest" in model_dict and hasattr(model_dict["Random Forest"], 'feature_names_in_'):
-    EXPECTED_FEATURES = list(model_dict["Random Forest"].feature_names_in_)
-    st.sidebar.info(f"🔍 Using {len(EXPECTED_FEATURES)} features from Random Forest")
-else:
-    # Fallback feature order
-    EXPECTED_FEATURES = [
-        "MonthlyIncome", "DistanceFromHome", "Education", "EnvironmentSatisfaction",
-        "HourlyRate", "JobInvolvement", "JobLevel", "JobSatisfaction", "Bonus",
-        "NumCompaniesWorked", "PerformanceRating", "RelationshipSatisfaction",
-        "StockOptionLevel", "TotalWorkingYears", "TrainingTimesLastYear",
-        "WorkLifeBalance", "EmployeeNumber",
-        "BusinessTravel", "Department", "EducationField", "Gender", "JobRole",
-        "MaritalStatus", "OverTime",
-        "BusinessTravel_FreqEnc", "Department_FreqEnc", "EducationField_FreqEnc",
-        "Gender_FreqEnc", "JobRole_FreqEnc", "MaritalStatus_FreqEnc", "OverTime_FreqEnc",
-        "BusinessTravel_TargetEnc", "Department_TargetEnc", "EducationField_TargetEnc",
-        "Gender_TargetEnc", "JobRole_TargetEnc", "MaritalStatus_TargetEnc", "OverTime_TargetEnc",
-        "HighTravelOvertime", "SingleOvertime"
-    ]
-    st.sidebar.warning(f"⚠️ Using default {len(EXPECTED_FEATURES)} features")
+st.sidebar.success(f"🎯 Using exact {len(EXPECTED_FEATURES)} feature order")
+st.sidebar.write(f"First 5: {EXPECTED_FEATURES[:5]}")
 
 # Fallback dummy model if none are available
 if not model_dict:
@@ -135,7 +115,7 @@ def get_target_encoding(feature_name, value):
 
 
 # ------------------------------
-# 3️⃣ Streamlit UI
+# 3️⃣ Streamlit UI - FIXED FEATURE ORDER
 # ------------------------------
 st.title("🏢 Employee Attrition Prediction")
 st.markdown("Predict whether an employee is likely to leave based on input features.")
@@ -187,7 +167,7 @@ with tab1:
     st.markdown("---")
     selected_model = st.selectbox("Choose Model", list(model_dict.keys()))
 
-    # 🆕 FIXED: Create input data using CONSISTENT feature order from scaler
+    # 🆕 FIXED: Create input data in EXACT feature order from the beginning
     input_data = {}
     
     # Create feature mappings
@@ -243,16 +223,10 @@ with tab1:
         "SingleOvertime": 1 if (marital_status == "Single" and overtime == "Yes") else 0,
     }
     
-    # 🆕 Build input data in EXACT order expected by Neural Network scaler
+    # 🆕 Build input data in EXACT order expected by models
     for feature in EXPECTED_FEATURES:
-        # Handle numpy string types
-        if hasattr(feature, 'item'):  # numpy string type
-            feature_name = feature.item()
-        else:
-            feature_name = feature
-            
-        if feature_name in feature_mappings:
-            input_data[feature] = feature_mappings[feature_name]
+        if feature in feature_mappings:
+            input_data[feature] = feature_mappings[feature]
         else:
             # Use default value for any missing features
             input_data[feature] = 0
@@ -264,11 +238,11 @@ with tab1:
     with st.expander("🔍 View Features Being Sent to Model"):
         st.write(f"Total features: {len(input_data)}")
         st.write(f"Model: {selected_model}")
-        st.write(f"Feature source: {'Neural Network Scaler' if NN_FEATURES else 'Random Forest'}")
+        st.write(f"Feature order: Exact match with training data")
         st.dataframe(input_df.T.rename(columns={0: "Value"}))
 
 # ------------------------------
-# 4️⃣ Prediction Tab - FIXED WITH SCALER FEATURE ORDER
+# 4️⃣ Prediction Tab - FIXED FOR ALL MODELS
 # ------------------------------
 with tab2:
     st.subheader("Prediction Results")
@@ -277,12 +251,11 @@ with tab2:
         try:
             model = model_dict[selected_model]
             
-            # 🆕 SIMPLIFIED: input_df is already in the correct order from scaler
+            # 🆕 SIMPLIFIED: input_df is already in the correct order
             input_df_aligned = input_df
             
-            st.success(f"✅ Using {len(input_df_aligned.columns)} features in exact scaler order")
+            st.success(f"✅ Using {len(input_df_aligned.columns)} features in exact training order")
             st.info(f"🧠 Model: {selected_model}")
-            st.info(f"📋 Feature source: {'Neural Network Scaler' if NN_FEATURES else 'Random Forest'}")
 
             if selected_model == "Neural Network":
                 try:
@@ -290,11 +263,6 @@ with tab2:
                     scaler_path = "models/neural_network_scaler.joblib"
                     if os.path.exists(scaler_path):
                         scaler = joblib.load(scaler_path)
-                        
-                        # 🆕 DEBUG: Show scaler feature info
-                        if hasattr(scaler, 'feature_names_in_'):
-                            st.success(f"🧠 Scaler expects {len(scaler.feature_names_in_)} features")
-                            st.write(f"First 5 scaler features: {list(scaler.feature_names_in_)[:5]}")
                         
                         # Scale the input features
                         input_scaled = scaler.transform(input_df_aligned)
