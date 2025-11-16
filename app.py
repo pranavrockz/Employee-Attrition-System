@@ -30,6 +30,16 @@ for name, path in model_files.items():
             st.sidebar.error(f"❌ Failed to load {name}: {e}")
     else:
         st.sidebar.warning(f"⚠️ {path} not found")
+        
+# 🆕 ADD THIS DEBUG SECTION TO SEE WHAT FEATURES MODELS EXPECT
+st.sidebar.markdown("---")
+st.sidebar.subheader("🔍 Model Feature Info")
+for name, model in model_dict.items():
+    if hasattr(model, 'feature_names_in_'):
+        st.sidebar.write(f"**{name}**: {len(model.feature_names_in_)} features")
+        st.sidebar.write(f"First 5: {list(model.feature_names_in_)[:5]}")
+    else:
+        st.sidebar.write(f"**{name}**: No feature names info")        
 
 # Fallback dummy model if none are available
 if not model_dict:
