@@ -236,62 +236,99 @@ with tab2:
         try:
             model = model_dict[selected_model]
 
-            # Align features with what the model expects
+            # FIXED: Better feature alignment with debug information
             if hasattr(model, 'feature_names_in_'):
-                expected_features = model.feature_names_in_
+                expected_features = list(model.feature_names_in_)
                 st.info(f"📋 Model expects {len(expected_features)} features")
-
-                # Ensure we have exactly the features the model wants
+                
+                # Check for missing features
+                missing_features = set(expected_features) - set(input_df.columns)
+                if missing_features:
+                    st.error(f"❌ Missing features: {list(missing_features)}")
+                    # Add missing features with default values
+                    for feature in missing_features:
+                        input_df[feature] = 0
+                
+                # Check for extra features
+                extra_features = set(input_df.columns) - set(expected_features)
+                if extra_features:
+                    st.warning(f"⚠️ Removing extra features: {list(extra_features)}")
+                
+                # Ensure we have exactly the features the model wants in the right order
                 input_df_aligned = input_df[expected_features]
-
+                
                 # Show feature match status
                 col_match1, col_match2 = st.columns(2)
                 with col_match1:
-                    st.success("🎯 All expected features present")
+                    st.success(f"🎯 Features aligned: {len(input_df_aligned.columns)}")
                 with col_match2:
-                    st.success("✅ No extra features")
+                    st.success(f"✅ Order preserved")
 
             else:
+                # For Neural Network or models without feature_names_in_
                 input_df_aligned = input_df
-                st.info("ℹ️ Using all provided features")
+                st.info(f"ℹ️ Using all {len(input_df_aligned.columns)} provided features")
 
+            # FIXED: Better prediction handling with fallbacks
             if selected_model == "Neural Network":
                 try:
                     # Load the neural network-specific scaler
-                    scaler = joblib.load('models/neural_network_scaler.joblib')
-
-                    # Scale the input features EXACTLY like during training
-                    input_scaled = scaler.transform(input_df_aligned)
-
-                    # Make prediction
-                    raw_prediction = model.predict(input_scaled, verbose=0)
-                    probability = float(raw_prediction[0][0])
-
-                    st.write(f"🧠 Scaled probability: {probability:.3f}")
-
-                    # Define prediction here
-                    prediction = 1 if probability > 0.5 else 0
-
-                except FileNotFoundError:
-                    st.error("❌ Neural Network scaler not found! Using Random Forest...")
-                    rf_model = model_dict["Random Forest"]
-                    probability = rf_model.predict_proba(input_df_aligned)[0][1]
-                    prediction = rf_model.predict(input_df_aligned)[0]
+                    scaler_path = "models/neural_network_scaler.joblib"
+                    if os.path.exists(scaler_path):
+                        scaler = joblib.load(scaler_path)
+                        
+                        # Scale the input features EXACTLY like during training
+                        input_scaled = scaler.transform(input_df_aligned)
+                        
+                        # Make prediction
+                        raw_prediction = model.predict(input_scaled, verbose=0)
+                        
+                        # Handle different output formats
+                        if hasattr(raw_prediction, '__len__') and len(raw_prediction) > 0:
+                            if hasattr(raw_prediction[0], '__len__') and len(raw_prediction[0]) > 1:
+                                probability = float(raw_prediction[0][1])  # Binary classification
+                            else:
+                                probability = float(raw_prediction[0][0])  # Single output
+                        else:
+                            probability = float(raw_prediction[0])
+                        
+                        prediction = 1 if probability > 0.5 else 0
+                        
+                    else:
+                        st.error("❌ Neural Network scaler not found!")
+                        raise FileNotFoundError("Scaler not found")
+                        
                 except Exception as e:
                     st.error(f"❌ Neural Network error: {e}")
                     # Fallback to Random Forest
-                    rf_model = model_dict["Random Forest"]
-                    probability = rf_model.predict_proba(input_df_aligned)[0][1]
-                    prediction = rf_model.predict(input_df_aligned)[0]
+                    if "Random Forest" in model_dict:
+                        st.info("🔄 Falling back to Random Forest model")
+                        fallback_model = model_dict["Random Forest"]
+                        if hasattr(fallback_model, 'predict_proba'):
+                            probability = fallback_model.predict_proba(input_df_aligned)[0][1]
+                            prediction = fallback_model.predict(input_df_aligned)[0]
+                        else:
+                            prediction = fallback_model.predict(input_df_aligned)[0]
+                            probability = 0.8 if prediction == 1 else 0.2
+                    else:
+                        # Ultimate fallback
+                        prediction = 0
+                        probability = 0.3
 
             else:
                 # For other models (Random Forest, XGBoost)
-                if hasattr(model, 'predict_proba'):
-                    probability = model.predict_proba(input_df_aligned)[0][1]
-                    prediction = model.predict(input_df_aligned)[0]
-                else:
-                    prediction = model.predict(input_df_aligned)[0]
-                    probability = 0.8 if prediction == 1 else 0.2
+                try:
+                    if hasattr(model, 'predict_proba'):
+                        probability = model.predict_proba(input_df_aligned)[0][1]
+                        prediction = model.predict(input_df_aligned)[0]
+                    else:
+                        prediction = model.predict(input_df_aligned)[0]
+                        probability = 0.8 if prediction == 1 else 0.2
+                except Exception as e:
+                    st.error(f"❌ {selected_model} prediction error: {e}")
+                    # Fallback
+                    prediction = 0
+                    probability = 0.3
 
             # Display results
             st.markdown("---")
@@ -388,6 +425,7 @@ with tab2:
 
         except Exception as e:
             st.error(f"❌ Prediction error: {e}")
+            st.info("💡 Try using a different model or check the feature values")
 
 # ------------------------------
 # 5️⃣ Footer
