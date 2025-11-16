@@ -8,13 +8,13 @@ from tensorflow.keras.models import load_model
 st.set_page_config(page_title="Employee Attrition Prediction", layout="wide")
 
 # ------------------------------
-# 1️⃣ Model Loading - FIXED PATHS
+# 1️⃣ Model Loading
 # ------------------------------
 model_dict = {}
 model_files = {
-    "Random Forest": "models/random_forest_model.joblib",  # 🆕 Added models/ prefix
-    "XGBoost": "models/xg_boost_model.joblib",            # 🆕 Added models/ prefix
-    "Neural Network": "models/neural_network_model_improved.h5"  # 🆕 Added models/ prefix
+    "Random Forest": "models/random_forest_model.joblib",
+    "XGBoost": "models/xg_boost_model.joblib",
+    "Neural Network": "models/neural_network_model_improved.h5"
 }
 
 for name, path in model_files.items():
@@ -226,7 +226,7 @@ with tab1:
         st.dataframe(input_df.T.rename(columns={0: "Value"}))
 
 # ------------------------------
-# 4️⃣ Prediction Tab - IMPROVED NEURAL NETWORK HANDLING
+# 4️⃣ Prediction Tab
 # ------------------------------
 with tab2:
     st.subheader("Prediction Results")
@@ -243,8 +243,6 @@ with tab2:
                 # Ensure we have exactly the features the model wants
                 input_df_aligned = input_df[expected_features]
 
-                st.success(f"✅ Perfect feature alignment! Using {input_df_aligned.shape[1]} features")
-
                 # Show feature match status
                 col_match1, col_match2 = st.columns(2)
                 with col_match1:
@@ -258,54 +256,32 @@ with tab2:
 
             if selected_model == "Neural Network":
                 try:
-                    # 🆕 FIXED: Load the neural network-specific scaler with correct path
-                    scaler_path = "models/neural_network_scaler.joblib"  # 🆕 Added models/ prefix
-                    if os.path.exists(scaler_path):
-                        scaler = joblib.load(scaler_path)
+                    # Load the neural network-specific scaler
+                    scaler = joblib.load('models/neural_network_scaler.joblib')
 
-                        # Scale the input features EXACTLY like during training
-                        input_scaled = scaler.transform(input_df_aligned)
+                    # Scale the input features EXACTLY like during training
+                    input_scaled = scaler.transform(input_df_aligned)
 
-                        # Make prediction
-                        raw_prediction = model.predict(input_scaled, verbose=0)
-                        
-                        # 🆕 IMPROVED: Better probability extraction
-                        if len(raw_prediction.shape) > 1 and raw_prediction.shape[1] > 1:
-                            probability = float(raw_prediction[0][1])  # Use second column for binary classification
-                        else:
-                            probability = float(raw_prediction[0][0])  # Single output
-                        
-                        st.write(f"🧠 Raw prediction: {raw_prediction[0]}")
-                        st.write(f"🧠 Scaled probability: {probability:.3f}")
+                    # Make prediction
+                    raw_prediction = model.predict(input_scaled, verbose=0)
+                    probability = float(raw_prediction[0][0])
 
-                        # Define prediction here
-                        prediction = 1 if probability > 0.5 else 0
+                    st.write(f"🧠 Scaled probability: {probability:.3f}")
 
-                    else:
-                        st.error(f"❌ Neural Network scaler not found at {scaler_path}!")
-                        # Fallback to Random Forest
-                        if "Random Forest" in model_dict:
-                            st.info("🔄 Falling back to Random Forest model...")
-                            rf_model = model_dict["Random Forest"]
-                            probability = rf_model.predict_proba(input_df_aligned)[0][1]
-                            prediction = rf_model.predict(input_df_aligned)[0]
-                        else:
-                            st.error("❌ No fallback model available!")
-                            prediction = 0
-                            probability = 0.3
-                            
+                    # Define prediction here
+                    prediction = 1 if probability > 0.5 else 0
+
+                except FileNotFoundError:
+                    st.error("❌ Neural Network scaler not found! Using Random Forest...")
+                    rf_model = model_dict["Random Forest"]
+                    probability = rf_model.predict_proba(input_df_aligned)[0][1]
+                    prediction = rf_model.predict(input_df_aligned)[0]
                 except Exception as e:
                     st.error(f"❌ Neural Network error: {e}")
                     # Fallback to Random Forest
-                    if "Random Forest" in model_dict:
-                        st.info("🔄 Falling back to Random Forest model...")
-                        rf_model = model_dict["Random Forest"]
-                        probability = rf_model.predict_proba(input_df_aligned)[0][1]
-                        prediction = rf_model.predict(input_df_aligned)[0]
-                    else:
-                        st.error("❌ No fallback model available!")
-                        prediction = 0
-                        probability = 0.3
+                    rf_model = model_dict["Random Forest"]
+                    probability = rf_model.predict_proba(input_df_aligned)[0][1]
+                    prediction = rf_model.predict(input_df_aligned)[0]
 
             else:
                 # For other models (Random Forest, XGBoost)
