@@ -159,11 +159,19 @@ with tab1:
     st.markdown("---")
     selected_model = st.selectbox("Choose Model", list(model_dict.keys()))
 
-    # Create input data with EXACT features the model expects
+    # 🆕 FIXED: Create input data using EXACT features from the selected model
     input_data = {}
-
-    # 1. Numeric features (ONLY the ones the model needs)
-    numeric_features = {
+    
+    # Get the expected features from the selected model
+    if hasattr(model_dict[selected_model], 'feature_names_in_'):
+        expected_features = list(model_dict[selected_model].feature_names_in_)
+    else:
+        # For Neural Network, use features from Random Forest as reference
+        expected_features = list(model_dict["Random Forest"].feature_names_in_)
+    
+    # 🆕 Create feature mappings for all expected features
+    feature_mappings = {
+        # Numeric features
         "MonthlyIncome": monthly_income,
         "DistanceFromHome": distance_from_home,
         "Education": education,
@@ -180,13 +188,9 @@ with tab1:
         "TotalWorkingYears": total_working_years,
         "TrainingTimesLastYear": training_times_last_year,
         "WorkLifeBalance": work_life_balance,
-        # Add EmployeeNumber that the model expects (using a placeholder)
         "EmployeeNumber": 1001,
-    }
-    input_data.update(numeric_features)
-
-    # 2. Label Encoded categorical features
-    categorical_features = {
+        
+        # Label encoded categorical features
         "BusinessTravel": label_encode_value("BusinessTravel", business_travel),
         "Department": label_encode_value("Department", department),
         "EducationField": label_encode_value("EducationField", education_field),
@@ -194,11 +198,8 @@ with tab1:
         "JobRole": label_encode_value("JobRole", job_role),
         "MaritalStatus": label_encode_value("MaritalStatus", marital_status),
         "OverTime": label_encode_value("OverTime", overtime),
-    }
-    input_data.update(categorical_features)
-
-    # 3. Frequency Encoded features
-    freq_encoded_features = {
+        
+        # Frequency encoded features
         "BusinessTravel_FreqEnc": get_frequency_encoding("BusinessTravel", business_travel),
         "Department_FreqEnc": get_frequency_encoding("Department", department),
         "EducationField_FreqEnc": get_frequency_encoding("EducationField", education_field),
@@ -206,11 +207,8 @@ with tab1:
         "JobRole_FreqEnc": get_frequency_encoding("JobRole", job_role),
         "MaritalStatus_FreqEnc": get_frequency_encoding("MaritalStatus", marital_status),
         "OverTime_FreqEnc": get_frequency_encoding("OverTime", overtime),
-    }
-    input_data.update(freq_encoded_features)
-
-    # 4. Target Encoded features
-    target_encoded_features = {
+        
+        # Target encoded features
         "BusinessTravel_TargetEnc": get_target_encoding("BusinessTravel", business_travel),
         "Department_TargetEnc": get_target_encoding("Department", department),
         "EducationField_TargetEnc": get_target_encoding("EducationField", education_field),
@@ -218,15 +216,25 @@ with tab1:
         "JobRole_TargetEnc": get_target_encoding("JobRole", job_role),
         "MaritalStatus_TargetEnc": get_target_encoding("MaritalStatus", marital_status),
         "OverTime_TargetEnc": get_target_encoding("OverTime", overtime),
-    }
-    input_data.update(target_encoded_features)
-
-    # 5. Engineered features
-    engineered_features = {
+        
+        # Engineered features
         "HighTravelOvertime": 1 if (business_travel == "Travel_Frequently" and overtime == "Yes") else 0,
         "SingleOvertime": 1 if (marital_status == "Single" and overtime == "Yes") else 0,
     }
-    input_data.update(engineered_features)
+    
+    # 🆕 Build input data in EXACT order expected by the model
+    for feature in expected_features:
+        # Handle numpy string types from XGBoost
+        if hasattr(feature, 'item'):  # numpy string type
+            feature_name = feature.item()
+        else:
+            feature_name = feature
+            
+        if feature_name in feature_mappings:
+            input_data[feature] = feature_mappings[feature_name]
+        else:
+            st.warning(f"⚠️ Unknown feature: {feature} - using default value 0")
+            input_data[feature] = 0
 
     # Convert to DataFrame
     input_df = pd.DataFrame([input_data])
@@ -234,6 +242,8 @@ with tab1:
     # Display feature summary
     with st.expander("🔍 View Features Being Sent to Model"):
         st.write(f"Total features: {len(input_data)}")
+        st.write(f"Model: {selected_model}")
+        st.write(f"Expected features: {len(expected_features)}")
         st.dataframe(input_df.T.rename(columns={0: "Value"}))
 
 # ------------------------------
@@ -245,41 +255,12 @@ with tab2:
     if st.button("🚀 Predict Attrition", use_container_width=True):
         try:
             model = model_dict[selected_model]
+            
+            # 🆕 SIMPLIFIED: We already built input_df in the exact order needed
+            input_df_aligned = input_df
+            
+            st.success(f"✅ Using {len(input_df_aligned.columns)} features in exact model order")
 
-            # FIXED: Better feature alignment with debug information
-            if hasattr(model, 'feature_names_in_'):
-                expected_features = list(model.feature_names_in_)
-                st.info(f"📋 Model expects {len(expected_features)} features")
-                
-                # Check for missing features
-                missing_features = set(expected_features) - set(input_df.columns)
-                if missing_features:
-                    st.error(f"❌ Missing features: {list(missing_features)}")
-                    # Add missing features with default values
-                    for feature in missing_features:
-                        input_df[feature] = 0
-                
-                # Check for extra features
-                extra_features = set(input_df.columns) - set(expected_features)
-                if extra_features:
-                    st.warning(f"⚠️ Removing extra features: {list(extra_features)}")
-                
-                # Ensure we have exactly the features the model wants in the right order
-                input_df_aligned = input_df[expected_features]
-                
-                # Show feature match status
-                col_match1, col_match2 = st.columns(2)
-                with col_match1:
-                    st.success(f"🎯 Features aligned: {len(input_df_aligned.columns)}")
-                with col_match2:
-                    st.success(f"✅ Order preserved")
-
-            else:
-                # For Neural Network or models without feature_names_in_
-                input_df_aligned = input_df
-                st.info(f"ℹ️ Using all {len(input_df_aligned.columns)} provided features")
-
-            # FIXED: Better prediction handling with fallbacks
             if selected_model == "Neural Network":
                 try:
                     # Load the neural network-specific scaler
@@ -287,22 +268,20 @@ with tab2:
                     if os.path.exists(scaler_path):
                         scaler = joblib.load(scaler_path)
                         
-                        # Scale the input features EXACTLY like during training
+                        # Scale the input features
                         input_scaled = scaler.transform(input_df_aligned)
                         
                         # Make prediction
                         raw_prediction = model.predict(input_scaled, verbose=0)
                         
                         # Handle different output formats
-                        if hasattr(raw_prediction, '__len__') and len(raw_prediction) > 0:
-                            if hasattr(raw_prediction[0], '__len__') and len(raw_prediction[0]) > 1:
-                                probability = float(raw_prediction[0][1])  # Binary classification
-                            else:
-                                probability = float(raw_prediction[0][0])  # Single output
-                        else:
-                            probability = float(raw_prediction[0])
+                        if raw_prediction.shape[1] > 1:  # Multiple outputs
+                            probability = float(raw_prediction[0][1])
+                        else:  # Single output
+                            probability = float(raw_prediction[0][0])
                         
                         prediction = 1 if probability > 0.5 else 0
+                        st.success("✅ Neural Network prediction successful")
                         
                     else:
                         st.error("❌ Neural Network scaler not found!")
@@ -310,23 +289,13 @@ with tab2:
                         
                 except Exception as e:
                     st.error(f"❌ Neural Network error: {e}")
-                    # Fallback to Random Forest
-                    if "Random Forest" in model_dict:
-                        st.info("🔄 Falling back to Random Forest model")
-                        fallback_model = model_dict["Random Forest"]
-                        if hasattr(fallback_model, 'predict_proba'):
-                            probability = fallback_model.predict_proba(input_df_aligned)[0][1]
-                            prediction = fallback_model.predict(input_df_aligned)[0]
-                        else:
-                            prediction = fallback_model.predict(input_df_aligned)[0]
-                            probability = 0.8 if prediction == 1 else 0.2
-                    else:
-                        # Ultimate fallback
-                        prediction = 0
-                        probability = 0.3
+                    # Simple fallback
+                    st.info("🔄 Using safe fallback values")
+                    prediction = 0
+                    probability = 0.3
 
             else:
-                # For other models (Random Forest, XGBoost)
+                # For scikit-learn models (Random Forest, XGBoost)
                 try:
                     if hasattr(model, 'predict_proba'):
                         probability = model.predict_proba(input_df_aligned)[0][1]
@@ -334,9 +303,12 @@ with tab2:
                     else:
                         prediction = model.predict(input_df_aligned)[0]
                         probability = 0.8 if prediction == 1 else 0.2
+                    st.success(f"✅ {selected_model} prediction successful")
+                    
                 except Exception as e:
                     st.error(f"❌ {selected_model} prediction error: {e}")
-                    # Fallback
+                    # Simple fallback
+                    st.info("🔄 Using safe fallback values")
                     prediction = 0
                     probability = 0.3
 
@@ -362,6 +334,9 @@ with tab2:
                 )
                 st.progress(float(probability))
                 st.caption(f"Confidence: {probability:.1%}")
+
+            # 🆕 SHOW WHICH MODEL WAS USED
+            st.info(f"🧠 **Model Used**: {selected_model}")
 
             # Risk factors analysis
             st.markdown("---")
