@@ -30,15 +30,27 @@ for name, path in model_files.items():
     else:
         st.sidebar.warning(f"⚠️ {path} not found")
 
-# 🆕 ADD DEBUG INFO FOR FEATURES
-st.sidebar.markdown("---")
-st.sidebar.subheader("🔍 Model Feature Info")
-for name, model in model_dict.items():
-    if hasattr(model, 'feature_names_in_'):
-        st.sidebar.write(f"**{name}**: {len(model.feature_names_in_)} features")
-        st.sidebar.write(f"First 5: {list(model.feature_names_in_)[:5]}")
-    else:
-        st.sidebar.write(f"**{name}**: No feature names info")
+# 🆕 GET EXPECTED FEATURES FROM RANDOM FOREST (ALL MODELS SHOULD USE SAME FEATURES)
+if "Random Forest" in model_dict and hasattr(model_dict["Random Forest"], 'feature_names_in_'):
+    EXPECTED_FEATURES = list(model_dict["Random Forest"].feature_names_in_)
+    st.sidebar.info(f"🔍 Using {len(EXPECTED_FEATURES)} features from Random Forest")
+else:
+    # Fallback feature order
+    EXPECTED_FEATURES = [
+        "MonthlyIncome", "DistanceFromHome", "Education", "EnvironmentSatisfaction",
+        "HourlyRate", "JobInvolvement", "JobLevel", "JobSatisfaction", "Bonus",
+        "NumCompaniesWorked", "PerformanceRating", "RelationshipSatisfaction",
+        "StockOptionLevel", "TotalWorkingYears", "TrainingTimesLastYear",
+        "WorkLifeBalance", "EmployeeNumber",
+        "BusinessTravel", "Department", "EducationField", "Gender", "JobRole",
+        "MaritalStatus", "OverTime",
+        "BusinessTravel_FreqEnc", "Department_FreqEnc", "EducationField_FreqEnc",
+        "Gender_FreqEnc", "JobRole_FreqEnc", "MaritalStatus_FreqEnc", "OverTime_FreqEnc",
+        "BusinessTravel_TargetEnc", "Department_TargetEnc", "EducationField_TargetEnc",
+        "Gender_TargetEnc", "JobRole_TargetEnc", "MaritalStatus_TargetEnc", "OverTime_TargetEnc",
+        "HighTravelOvertime", "SingleOvertime"
+    ]
+    st.sidebar.warning(f"⚠️ Using default {len(EXPECTED_FEATURES)} features")
 
 # Fallback dummy model if none are available
 if not model_dict:
@@ -157,33 +169,10 @@ with tab1:
     st.markdown("---")
     selected_model = st.selectbox("Choose Model", list(model_dict.keys()))
 
-    # 🆕 FIXED: Create input data using EXACT features from Random Forest model as reference
-    # (since all models should have the same features)
+    # 🆕 FIXED: Create input data using CONSISTENT feature order for ALL models
     input_data = {}
     
-    # Get expected features from Random Forest (all models should have same features)
-    if "Random Forest" in model_dict and hasattr(model_dict["Random Forest"], 'feature_names_in_'):
-        expected_features = list(model_dict["Random Forest"].feature_names_in_)
-        st.info(f"📋 Using {len(expected_features)} features from Random Forest as reference")
-    else:
-        # Fallback to our known feature set
-        expected_features = [
-            "MonthlyIncome", "DistanceFromHome", "Education", "EnvironmentSatisfaction",
-            "HourlyRate", "JobInvolvement", "JobLevel", "JobSatisfaction", "Bonus",
-            "NumCompaniesWorked", "PerformanceRating", "RelationshipSatisfaction",
-            "StockOptionLevel", "TotalWorkingYears", "TrainingTimesLastYear",
-            "WorkLifeBalance", "EmployeeNumber",
-            "BusinessTravel", "Department", "EducationField", "Gender", "JobRole",
-            "MaritalStatus", "OverTime",
-            "BusinessTravel_FreqEnc", "Department_FreqEnc", "EducationField_FreqEnc",
-            "Gender_FreqEnc", "JobRole_FreqEnc", "MaritalStatus_FreqEnc", "OverTime_FreqEnc",
-            "BusinessTravel_TargetEnc", "Department_TargetEnc", "EducationField_TargetEnc",
-            "Gender_TargetEnc", "JobRole_TargetEnc", "MaritalStatus_TargetEnc", "OverTime_TargetEnc",
-            "HighTravelOvertime", "SingleOvertime"
-        ]
-        st.warning(f"⚠️ Using default {len(expected_features)} features")
-    
-    # 🆕 Create feature mappings for all expected features
+    # Create feature mappings
     feature_mappings = {
         # Numeric features
         "MonthlyIncome": monthly_income,
@@ -236,8 +225,8 @@ with tab1:
         "SingleOvertime": 1 if (marital_status == "Single" and overtime == "Yes") else 0,
     }
     
-    # 🆕 Build input data in EXACT order expected by models
-    for feature in expected_features:
+    # 🆕 Build input data in EXACT order expected by ALL models
+    for feature in EXPECTED_FEATURES:
         # Handle numpy string types from XGBoost
         if hasattr(feature, 'item'):  # numpy string type
             feature_name = feature.item()
@@ -247,21 +236,20 @@ with tab1:
         if feature_name in feature_mappings:
             input_data[feature] = feature_mappings[feature_name]
         else:
-            st.warning(f"⚠️ Unknown feature: {feature} - using default value 0")
+            # Use default value for any missing features
             input_data[feature] = 0
 
-    # Convert to DataFrame
-    input_df = pd.DataFrame([input_data])
+    # Convert to DataFrame - this ensures consistent order
+    input_df = pd.DataFrame([input_data])[EXPECTED_FEATURES]
 
     # Display feature summary
     with st.expander("🔍 View Features Being Sent to Model"):
         st.write(f"Total features: {len(input_data)}")
         st.write(f"Model: {selected_model}")
-        st.write(f"Expected features: {len(expected_features)}")
         st.dataframe(input_df.T.rename(columns={0: "Value"}))
 
 # ------------------------------
-# 4️⃣ Prediction Tab - FIXED FOR ALL MODELS
+# 4️⃣ Prediction Tab - FIXED FOR DEPLOYMENT
 # ------------------------------
 with tab2:
     st.subheader("Prediction Results")
@@ -270,10 +258,11 @@ with tab2:
         try:
             model = model_dict[selected_model]
             
-            # 🆕 SIMPLIFIED: We already built input_df in the exact order needed
+            # 🆕 SIMPLIFIED: input_df is already in the correct order for ALL models
             input_df_aligned = input_df
             
-            st.success(f"✅ Using {len(input_df_aligned.columns)} features in exact order")
+            st.success(f"✅ Using {len(input_df_aligned.columns)} features in consistent order")
+            st.info(f"🧠 Model: {selected_model}")
 
             if selected_model == "Neural Network":
                 try:
@@ -288,7 +277,7 @@ with tab2:
                         # Make prediction
                         raw_prediction = model.predict(input_scaled, verbose=0)
                         
-                        # Handle different output formats
+                        # 🆕 IMPROVED: Better probability extraction
                         if raw_prediction.shape[1] > 1:  # Multiple outputs
                             probability = float(raw_prediction[0][1])
                         else:  # Single output
@@ -299,17 +288,8 @@ with tab2:
                         
                     else:
                         st.error(f"❌ Neural Network scaler not found at {scaler_path}!")
-                        # Fallback to Random Forest
-                        if "Random Forest" in model_dict:
-                            st.info("🔄 Falling back to Random Forest model...")
-                            fallback_model = model_dict["Random Forest"]
-                            probability = fallback_model.predict_proba(input_df_aligned)[0][1]
-                            prediction = fallback_model.predict(input_df_aligned)[0]
-                        else:
-                            st.error("❌ No fallback model available!")
-                            prediction = 0
-                            probability = 0.3
-                            
+                        raise FileNotFoundError("Scaler not found")
+                        
                 except Exception as e:
                     st.error(f"❌ Neural Network error: {e}")
                     # Fallback to Random Forest
@@ -341,7 +321,7 @@ with tab2:
                     prediction = 0
                     probability = 0.3
 
-            # Display results
+            # Display results (keep your existing display code)
             st.markdown("---")
             st.subheader("📋 Prediction Summary")
 
