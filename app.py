@@ -30,8 +30,26 @@ for name, path in model_files.items():
     else:
         st.sidebar.warning(f"⚠️ {path} not found")
 
-# 🆕 GET EXPECTED FEATURES FROM RANDOM FOREST (ALL MODELS SHOULD USE SAME FEATURES)
-if "Random Forest" in model_dict and hasattr(model_dict["Random Forest"], 'feature_names_in_'):
+# 🆕 EXTRACT FEATURE ORDER FROM NEURAL NETWORK SCALER
+NN_FEATURES = None
+scaler_path = "models/neural_network_scaler.joblib"
+if os.path.exists(scaler_path):
+    try:
+        scaler = joblib.load(scaler_path)
+        # Check if scaler has feature names
+        if hasattr(scaler, 'feature_names_in_'):
+            NN_FEATURES = list(scaler.feature_names_in_)
+            st.sidebar.success(f"🧠 Neural Network scaler has {len(NN_FEATURES)} features")
+        else:
+            st.sidebar.warning("🧠 Scaler doesn't have feature names, using Random Forest features")
+    except Exception as e:
+        st.sidebar.error(f"❌ Failed to load scaler: {e}")
+
+# 🆕 GET EXPECTED FEATURES (PRIORITIZE NEURAL NETWORK, FALLBACK TO RANDOM FOREST)
+if NN_FEATURES is not None:
+    EXPECTED_FEATURES = NN_FEATURES
+    st.sidebar.info(f"🔍 Using {len(EXPECTED_FEATURES)} features from Neural Network scaler")
+elif "Random Forest" in model_dict and hasattr(model_dict["Random Forest"], 'feature_names_in_'):
     EXPECTED_FEATURES = list(model_dict["Random Forest"].feature_names_in_)
     st.sidebar.info(f"🔍 Using {len(EXPECTED_FEATURES)} features from Random Forest")
 else:
@@ -169,7 +187,7 @@ with tab1:
     st.markdown("---")
     selected_model = st.selectbox("Choose Model", list(model_dict.keys()))
 
-    # 🆕 FIXED: Create input data using CONSISTENT feature order for ALL models
+    # 🆕 FIXED: Create input data using CONSISTENT feature order from scaler
     input_data = {}
     
     # Create feature mappings
@@ -225,9 +243,9 @@ with tab1:
         "SingleOvertime": 1 if (marital_status == "Single" and overtime == "Yes") else 0,
     }
     
-    # 🆕 Build input data in EXACT order expected by ALL models
+    # 🆕 Build input data in EXACT order expected by Neural Network scaler
     for feature in EXPECTED_FEATURES:
-        # Handle numpy string types from XGBoost
+        # Handle numpy string types
         if hasattr(feature, 'item'):  # numpy string type
             feature_name = feature.item()
         else:
@@ -246,10 +264,11 @@ with tab1:
     with st.expander("🔍 View Features Being Sent to Model"):
         st.write(f"Total features: {len(input_data)}")
         st.write(f"Model: {selected_model}")
+        st.write(f"Feature source: {'Neural Network Scaler' if NN_FEATURES else 'Random Forest'}")
         st.dataframe(input_df.T.rename(columns={0: "Value"}))
 
 # ------------------------------
-# 4️⃣ Prediction Tab - FIXED FOR DEPLOYMENT
+# 4️⃣ Prediction Tab - FIXED WITH SCALER FEATURE ORDER
 # ------------------------------
 with tab2:
     st.subheader("Prediction Results")
@@ -258,11 +277,12 @@ with tab2:
         try:
             model = model_dict[selected_model]
             
-            # 🆕 SIMPLIFIED: input_df is already in the correct order for ALL models
+            # 🆕 SIMPLIFIED: input_df is already in the correct order from scaler
             input_df_aligned = input_df
             
-            st.success(f"✅ Using {len(input_df_aligned.columns)} features in consistent order")
+            st.success(f"✅ Using {len(input_df_aligned.columns)} features in exact scaler order")
             st.info(f"🧠 Model: {selected_model}")
+            st.info(f"📋 Feature source: {'Neural Network Scaler' if NN_FEATURES else 'Random Forest'}")
 
             if selected_model == "Neural Network":
                 try:
@@ -271,13 +291,18 @@ with tab2:
                     if os.path.exists(scaler_path):
                         scaler = joblib.load(scaler_path)
                         
+                        # 🆕 DEBUG: Show scaler feature info
+                        if hasattr(scaler, 'feature_names_in_'):
+                            st.success(f"🧠 Scaler expects {len(scaler.feature_names_in_)} features")
+                            st.write(f"First 5 scaler features: {list(scaler.feature_names_in_)[:5]}")
+                        
                         # Scale the input features
                         input_scaled = scaler.transform(input_df_aligned)
                         
                         # Make prediction
                         raw_prediction = model.predict(input_scaled, verbose=0)
                         
-                        # 🆕 IMPROVED: Better probability extraction
+                        # Handle different output formats
                         if raw_prediction.shape[1] > 1:  # Multiple outputs
                             probability = float(raw_prediction[0][1])
                         else:  # Single output
@@ -321,7 +346,7 @@ with tab2:
                     prediction = 0
                     probability = 0.3
 
-            # Display results (keep your existing display code)
+            # Display results
             st.markdown("---")
             st.subheader("📋 Prediction Summary")
 
@@ -343,9 +368,6 @@ with tab2:
                 )
                 st.progress(float(probability))
                 st.caption(f"Confidence: {probability:.1%}")
-
-            # 🆕 SHOW WHICH MODEL WAS USED
-            st.info(f"🧠 **Model Used**: {selected_model}")
 
             # Risk factors analysis
             st.markdown("---")
@@ -419,7 +441,6 @@ with tab2:
 
         except Exception as e:
             st.error(f"❌ Prediction error: {e}")
-            st.info("💡 Try using a different model or check the feature values")
 
 # ------------------------------
 # 5️⃣ Footer
