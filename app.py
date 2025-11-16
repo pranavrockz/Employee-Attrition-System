@@ -3,7 +3,10 @@ import pandas as pd
 import numpy as np
 import joblib
 import os
+import warnings
 from tensorflow.keras.models import load_model
+
+warnings.filterwarnings("ignore")
 
 st.set_page_config(page_title="Employee Attrition Prediction", layout="wide")
 
@@ -20,7 +23,7 @@ nn_scaler_path = os.path.join(MODEL_DIR, "neural_network_scaler.joblib")
 
 # ------------------------------
 # EXPECTED FEATURES (exact order)
-# Adjust this list to match the order used during training
+# Replace/adjust this to exactly match training column order if needed
 # ------------------------------
 EXPECTED_FEATURES = [
     'BusinessTravel', 'Department', 'DistanceFromHome', 'Education',
@@ -41,6 +44,7 @@ EXPECTED_FEATURES = [
 # ------------------------------
 # 1️⃣ Model Loading
 # ------------------------------
+st.sidebar.header("Model & Scaler Status")
 model_dict = {}
 for name, path in model_files.items():
     if os.path.exists(path):
@@ -65,22 +69,22 @@ if os.path.exists(nn_scaler_path):
     except Exception as e:
         st.sidebar.error(f"❌ Failed to load NN scaler: {e}")
 else:
-    st.sidebar.info("ℹ️ Neural network scaler not found")
+    st.sidebar.info("ℹ️ Neural network scaler not found (models expecting NN will fall back)")
 
 # Fallback dummy model if none are available
 if not model_dict:
     class DummyModel:
         def predict(self, X):
-            return np.array([0])
+            return np.zeros((len(X),), dtype=int)
 
         def predict_proba(self, X):
-            return np.array([[0.7, 0.3]])
+            return np.tile([0.7, 0.3], (len(X), 1))
 
     model_dict = {"Dummy Model": DummyModel()}
     st.sidebar.info("🧠 Using fallback dummy model.")
 
 # ------------------------------
-# 2️⃣ Encoding helpers (same as training)
+# 2️⃣ Encoding helpers (must match training)
 # ------------------------------
 categorical_mappings = {
     'BusinessTravel': ['Non-Travel', 'Travel_Rarely', 'Travel_Frequently'],
@@ -119,6 +123,7 @@ def label_encode_value(feature_name, value):
         try:
             return categorical_mappings[feature_name].index(value)
         except ValueError:
+            # unknown category -> map to index 0 (or choose a safer default)
             return 0
     return value
 
@@ -184,7 +189,7 @@ with tab1:
     st.markdown("---")
     selected_model = st.selectbox("Choose Model", list(model_dict.keys()))
 
-    # Build feature dict according to EXPECTED_FEATURES
+    # Build feature dict according to EXPECTED_FEATURES (must match training order)
     feature_map = {
         # numeric
         "MonthlyIncome": monthly_income,
@@ -251,30 +256,35 @@ with tab2:
         try:
             model = model_dict[selected_model]
 
-            # Align input for models that expose feature_names_in_
+            # Align input for models that expose feature_names_in_ (sklearn)
             input_df_aligned = input_df.copy()
             if hasattr(model, "feature_names_in_"):
-                # ensure the order and exact names match
                 expected = list(model.feature_names_in_)
-                # if any expected feature missing, fill with zeros
+                # add any missing features with zeros
                 for feat in expected:
                     if feat not in input_df_aligned.columns:
                         input_df_aligned[feat] = 0
+                # reorder to model's expected order
                 input_df_aligned = input_df_aligned[expected]
             else:
-                # otherwise, use EXPECTED_FEATURES order (already ensured above)
+                # use EXPECTED_FEATURES order (already ensured above)
                 input_df_aligned = input_df_aligned[EXPECTED_FEATURES]
 
             st.success(f"✅ Prepared input with {input_df_aligned.shape[1]} features")
 
-            # Predict
+            # -------------------------
+            # Prediction logic
+            # -------------------------
+            probability = None
+            prediction = None
+
             if selected_model == "Neural Network":
+                # Neural network requires the saved scaler and numpy input
                 if nn_scaler is None:
-                    st.error("❌ NN scaler not loaded. Cannot run neural network. Falling back.")
-                    # fallback
+                    st.error("❌ NN scaler not loaded. Falling back to Random Forest (if available).")
                     if "Random Forest" in model_dict:
                         rf = model_dict["Random Forest"]
-                        probability = rf.predict_proba(input_df_aligned)[0][1]
+                        probability = float(rf.predict_proba(input_df_aligned)[0][1])
                         prediction = int(rf.predict(input_df_aligned)[0])
                     else:
                         probability = 0.3
@@ -284,32 +294,41 @@ with tab2:
                     input_np = input_df_aligned.to_numpy()
                     input_scaled = nn_scaler.transform(input_np)
                     raw = model.predict(input_scaled, verbose=0)
-                    # raw might be shape (1,1) or (1,) depending on model saving — handle both
-                    if isinstance(raw, np.ndarray):
-                        probability = float(np.asarray(raw).reshape(-1)[0])
-                    else:
-                        probability = float(raw[0])
+
+                    # raw handling: could be (1,1), (1,), or list
+                    raw_arr = np.asarray(raw).reshape(-1)
+                    probability = float(raw_arr[0])
+                    # Clip probability to avoid exact 0.0 or 1.0 showing in UI
+                    probability = float(np.clip(probability, 0.001, 0.999))
                     prediction = 1 if probability > 0.5 else 0
                     st.success("✅ Neural Network prediction successful")
 
             else:
-                # scikit-learn models
+                # scikit-learn models (Random Forest, XGBoost, etc.)
                 if hasattr(model, "predict_proba"):
-                    probability = float(model.predict_proba(input_df_aligned)[0][1])
+                    prob_raw = model.predict_proba(input_df_aligned)[0]
+                    # some models return shape (n_classes,) or [[...]]
+                    probability = float(prob_raw[1]) if len(prob_raw) > 1 else float(prob_raw[0])
+                    probability = float(np.clip(probability, 0.001, 0.999))
                     prediction = int(model.predict(input_df_aligned)[0])
                 else:
                     prediction = int(model.predict(input_df_aligned)[0])
                     probability = 0.8 if prediction == 1 else 0.2
+                    probability = float(np.clip(probability, 0.001, 0.999))
 
+            # -------------------------
             # Display results
+            # -------------------------
             st.markdown("---")
             st.subheader("📋 Prediction Summary")
             col_result, col_prob = st.columns(2)
             with col_result:
                 if prediction == 1:
                     st.error("🚨 **Prediction: Likely to Leave**")
+                    st.warning("Consider retention strategies for this employee.")
                 else:
                     st.success("✅ **Prediction: Likely to Stay**")
+                    st.info("Employee shows low attrition risk.")
 
             with col_prob:
                 st.metric(
@@ -321,7 +340,9 @@ with tab2:
                 st.progress(float(probability))
                 st.caption(f"Confidence: {probability:.1%}")
 
-            # Risk factors (same logic as before)
+            # -------------------------
+            # Risk factors
+            # -------------------------
             st.markdown("---")
             st.subheader("🔍 Key Risk Factors")
             risks = []
@@ -342,23 +363,29 @@ with tab2:
 
             if risks:
                 st.write("**Identified Risk Factors:**")
-                for risk in risks:
-                    st.write(f"• {risk}")
+                for r in risks:
+                    st.write(f"• {r}")
                 risk_score = min(100, len(risks) * 15)
                 st.metric("Overall Risk Score", f"{risk_score}%")
             else:
                 st.success("✅ No major risk factors identified")
 
-            # Feature importance for tree models
+            # -------------------------
+            # Feature importance (tree models)
+            # -------------------------
             if hasattr(model, 'feature_importances_') and selected_model != "Neural Network":
-                st.markdown("---")
-                st.subheader("📊 Top Influencing Factors")
-                fi = pd.DataFrame({
-                    'Feature': input_df_aligned.columns,
-                    'Importance': model.feature_importances_
-                }).sort_values('Importance', ascending=False).head(8)
-                fi['Feature'] = fi['Feature'].str.replace('_FreqEnc', ' Freq').str.replace('_TargetEnc', ' Target')
-                st.bar_chart(fi.set_index('Feature')['Importance'])
+                try:
+                    st.markdown("---")
+                    st.subheader("📊 Top Influencing Factors")
+                    fi = pd.DataFrame({
+                        'Feature': input_df_aligned.columns,
+                        'Importance': model.feature_importances_
+                    }).sort_values('Importance', ascending=False).head(8)
+                    fi['Feature'] = fi['Feature'].str.replace('_FreqEnc', ' Freq').str.replace('_TargetEnc', ' Target')
+                    st.bar_chart(fi.set_index('Feature')['Importance'])
+                except Exception:
+                    # silently continue if something unexpected happens
+                    pass
 
         except Exception as e:
             st.error(f"❌ Prediction error: {e}")
@@ -369,7 +396,8 @@ with tab2:
 st.markdown("---")
 st.markdown("""
 **About this app:**  
-- Input features aligned to the training order  
-- Neural Network uses a saved StandardScaler for exact scaling  
-- Fallbacks in place if model or scaler files are missing
+- Input features are aligned to the training order (adjust EXPECTED_FEATURES if training order differs).  
+- Neural Network uses a saved StandardScaler for exact scaling.  
+- Probabilities are clipped to avoid showing 0%/100% due to tiny numeric differences or mismatches.  
+- Fallbacks are in place if model or scaler files are missing.
 """)
