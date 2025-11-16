@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 import joblib
 import os
+import tensorflow
 from tensorflow.keras.models import load_model
 
 st.set_page_config(page_title="Employee Attrition Prediction", layout="wide")
