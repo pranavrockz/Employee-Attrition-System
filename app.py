@@ -1,4 +1,4 @@
-import streamlit as st
+lsimport streamlit as st
 import pandas as pd
 import numpy as np
 import joblib
@@ -12,9 +12,9 @@ st.set_page_config(page_title="Employee Attrition Prediction", layout="wide")
 # ------------------------------
 model_dict = {}
 model_files = {
-    "Random Forest": "random_forest_model.joblib",
-    "XGBoost": "xg_boost_model.joblib",
-    "Neural Network": "neural_network_model_improved.h5"
+    "Random Forest": "models/random_forest_model.joblib",
+    "XGBoost": "models/xg_boost_model.joblib",
+    "Neural Network": "models/neural_network_model_improved.h5"
 }
 
 # EXACT feature order for Neural Network (from your training)
@@ -288,7 +288,7 @@ with tab2:
 
                 try:
                     # Try the original scaler first
-                    scaler = joblib.load('neural_network_scaler.joblib')
+                    scaler = joblib.load('models/neural_network_scaler.joblib')
                     input_scaled = scaler.transform(input_df_aligned)
 
                     # Check if scaling looks reasonable
